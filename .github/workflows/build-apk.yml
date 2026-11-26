@@ -1,0 +1,39 @@
+name: Build APK
+
+on:
+  workflow_dispatch:      # 手动触发
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: 安装依赖并把 www 同步进 android
+        run: |
+          npm install --no-audit --no-fund
+          npx cap sync android
+
+      - name: 编译 debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freeapp-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
