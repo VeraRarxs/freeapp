@@ -1,0 +1,70 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: 环境自检并补装 SDK 35
+        run: |
+          java -version
+          node -v
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" || true
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SM" ] || SM="$(command -v sdkmanager)"
+          "$SM" --licenses > /dev/null 2>&1 || true
+          "$SM" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+
+      - name: 安装依赖并同步网页资源
+        run: |
+          npm install --no-audit --no-fund
+          npx cap sync android
+          ls -la android/app/src/main/assets/public | head
+
+      - name: 补齐缺失的 cordova 插件模块
+        run: |
+          if [ ! -d android/capacitor-cordova-android-plugins ]; then
+          mkdir -p android/capacitor-cordova-android-plugins/src/main
+          cat > android/capacitor-cordova-android-plugins/build.gradle <<'EOF'
+          apply plugin: 'com.android.library'
+          android {
+              namespace "capacitor.cordova.android.plugins"
+              compileSdkVersion rootProject.ext.compileSdkVersion
+              defaultConfig {
+                  minSdkVersion rootProject.ext.minSdkVersion
+                  targetSdkVersion rootProject.ext.targetSdkVersion
+              }
+          }
+          repositories { flatDir { dirs 'src/main/libs' } }
+          dependencies { implementation fileTree(dir: 'src/main/libs', include: ['*.jar']) }
+          EOF
+          fi
+
+      - name: 编译 debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freeapp-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
